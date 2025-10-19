@@ -389,10 +389,39 @@ go test ./middleware
 - Token bucket algorithm option
 - Metrics and monitoring integration
 
+## CI/CD Pipeline
+
+This project includes a comprehensive CI/CD pipeline using GitHub Actions that runs on every pull request:
+
+### Automated Tests
+
+1. **Unit Tests**
+   - Runs all unit tests with race detection (`-race`)
+   - Generates code coverage report
+   - Enforces minimum 80% code coverage
+   - Tests all components: storage, rate limiter, and middleware
+
+2. **Integration Tests**
+   - Starts the example server
+   - Performs load testing with `hey`
+   - Verifies exactly 100 requests are allowed per minute
+   - Tests concurrent request handling (50 concurrent connections)
+   - Validates rate limit window reset after expiration
+   - Confirms Retry-After header presence
+   - Validates 429 HTTP status code
+
+### CI Workflow
+
+The CI pipeline runs automatically on:
+- Pull requests to `main` branch
+- Direct pushes to `main` branch
+
+All tests must pass before a PR can be merged.
+
 ## Contributing
 
 Contributions are welcome! Please ensure:
-- All tests pass before submitting a PR
+- All tests pass before submitting a PR (CI will verify this)
 - New features include comprehensive tests
 - Code follows Go best practices
 - Documentation is updated accordingly
