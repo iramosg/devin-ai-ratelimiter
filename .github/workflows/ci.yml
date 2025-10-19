@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests
+        run: go test ./... -v -race -coverprofile=coverage.out
+
+      - name: Check test coverage
+        run: |
+          go tool cover -func=coverage.out
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "Coverage is below 80%"
+            exit 1
+          fi
+
+  integration-test:
+    name: Integration & Load Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install hey (load testing tool)
+        run: |
+          go install github.com/rakyll/hey@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      - name: Start example server in background
+        run: |
+          go run examples/memory/memory.go &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          
+          # Wait for server to be ready
+          echo "Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/ > /dev/null 2>&1; then
+              echo "Server is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Server failed to start"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Test rate limiter with load testing
+        run: |
+          echo "=== Test 1: Verify 100 requests are allowed ==="
+          RESULT=$(hey -n 150 -c 1 -q 1000 http://localhost:8080/ 2>&1)
+          echo "$RESULT"
+          
+          STATUS_200=$(echo "$RESULT" | grep "\[200\]" | awk '{print $2}')
+          STATUS_429=$(echo "$RESULT" | grep "\[429\]" | awk '{print $2}')
+          
+          echo "200 responses: $STATUS_200"
+          echo "429 responses: $STATUS_429"
+          
+          if [ "$STATUS_200" != "100" ]; then
+            echo "ERROR: Expected 100 successful requests, got $STATUS_200"
+            exit 1
+          fi
+          
+          if [ "$STATUS_429" != "50" ]; then
+            echo "ERROR: Expected 50 blocked requests, got $STATUS_429"
+            exit 1
+          fi
+          
+          echo "✅ Test 1 passed: Rate limiter correctly allowed 100 requests and blocked 50"
+          
+          # Wait for rate limit window to reset
+          echo "Waiting 65 seconds for rate limit window to reset..."
+          sleep 65
+          
+          echo "=== Test 2: Verify rate limit resets after window ==="
+          RESULT2=$(hey -n 150 -c 1 -q 1000 http://localhost:8080/ 2>&1)
+          echo "$RESULT2"
+          
+          STATUS_200_2=$(echo "$RESULT2" | grep "\[200\]" | awk '{print $2}')
+          STATUS_429_2=$(echo "$RESULT2" | grep "\[429\]" | awk '{print $2}')
+          
+          echo "200 responses: $STATUS_200_2"
+          echo "429 responses: $STATUS_429_2"
+          
+          if [ "$STATUS_200_2" != "100" ]; then
+            echo "ERROR: Expected 100 successful requests after reset, got $STATUS_200_2"
+            exit 1
+          fi
+          
+          echo "✅ Test 2 passed: Rate limiter correctly reset after window"
+
+      - name: Test concurrent requests
+        run: |
+          echo "=== Test 3: Verify concurrent requests handling ==="
+          
+          # Wait for rate limit to reset
+          sleep 65
+          
+          RESULT3=$(hey -n 200 -c 50 -q 1000 http://localhost:8080/ 2>&1)
+          echo "$RESULT3"
+          
+          STATUS_200_3=$(echo "$RESULT3" | grep "\[200\]" | awk '{print $2}')
+          STATUS_429_3=$(echo "$RESULT3" | grep "\[429\]" | awk '{print $2}')
+          
+          echo "200 responses: $STATUS_200_3"
+          echo "429 responses: $STATUS_429_3"
+          
+          if [ "$STATUS_200_3" != "100" ]; then
+            echo "ERROR: Expected 100 successful requests with concurrency, got $STATUS_200_3"
+            exit 1
+          fi
+          
+          if [ "$STATUS_429_3" != "100" ]; then
+            echo "ERROR: Expected 100 blocked requests with concurrency, got $STATUS_429_3"
+            exit 1
+          fi
+          
+          echo "✅ Test 3 passed: Rate limiter correctly handles concurrent requests"
+
+      - name: Verify Retry-After header
+        run: |
+          echo "=== Test 4: Verify Retry-After header is present ==="
+          
+          # Wait for rate limit to reset
+          sleep 65
+          
+          # Make 101 requests to trigger rate limiting
+          for i in {1..101}; do
+            curl -s http://localhost:8080/ > /dev/null
+          done
+          
+          # Check if Retry-After header is present
+          RESPONSE=$(curl -i -s http://localhost:8080/)
+          echo "$RESPONSE"
+          
+          if echo "$RESPONSE" | grep -q "Retry-After:"; then
+            echo "✅ Test 4 passed: Retry-After header is present"
+          else
+            echo "ERROR: Retry-After header not found"
+            exit 1
+          fi
+          
+          if echo "$RESPONSE" | grep -q "429 Too Many Requests"; then
+            echo "✅ Correct HTTP status code (429)"
+          else
+            echo "ERROR: Expected 429 status code"
+            exit 1
+          fi
+
+      - name: Stop server
+        if: always()
+        run: |
+          if [ ! -z "$SERVER_PID" ]; then
+            kill $SERVER_PID || true
+          fi
