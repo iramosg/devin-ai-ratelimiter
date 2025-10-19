@@ -24,7 +24,7 @@ func main() {
 	}))
 
 	limiter := ratelimiter.New(
-		ratelimiter.WithMaxRequests(10),
+		ratelimiter.WithMaxRequests(100),
 		ratelimiter.WithWindowDuration(time.Minute),
 		ratelimiter.WithBlockDuration(time.Minute),
 		ratelimiter.WithLogger(logger),
@@ -68,7 +68,7 @@ func main() {
 	}
 
 	log.Printf("Starting server on %s", server.Addr)
-	log.Printf("Rate limit: 10 requests per minute")
+	log.Printf("Rate limit: 100 requests per minute")
 	log.Printf("Block duration: 1 minute")
 	log.Println("Try accessing http://localhost:8080/")
 
