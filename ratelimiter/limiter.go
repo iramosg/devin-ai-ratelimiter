@@ -16,6 +16,7 @@ type Storage interface {
 	BlockClient(clientID string, blockedUntil time.Time)
 	DeleteClient(clientID string)
 	Clear()
+	CheckAndIncrement(clientID string, now time.Time, windowDuration time.Duration, maxRequests int, blockDuration time.Duration) (*storage.ClientData, bool)
 }
 
 type RateLimiter struct {
@@ -110,9 +111,9 @@ type Result struct {
 func (rl *RateLimiter) Allow(clientID string) *Result {
 	now := time.Now()
 
-	data, exists := rl.storage.GetClientData(clientID)
+	data, allowed := rl.storage.CheckAndIncrement(clientID, now, rl.windowDuration, rl.maxRequests, rl.blockDuration)
 
-	if exists && !data.BlockedUntil.IsZero() && now.Before(data.BlockedUntil) {
+	if !allowed {
 		retryAfterSec := int(time.Until(data.BlockedUntil).Seconds())
 		if retryAfterSec < 1 {
 			retryAfterSec = 1
@@ -137,48 +138,23 @@ func (rl *RateLimiter) Allow(clientID string) *Result {
 		}
 	}
 
-	if exists && (!data.BlockedUntil.IsZero() && now.After(data.BlockedUntil)) {
-		rl.storage.ResetWindow(clientID, now)
-		exists = false
-	}
-
-	if exists && now.Sub(data.WindowStart) >= rl.windowDuration {
-		rl.storage.ResetWindow(clientID, now)
-		exists = false
-	}
-
-	var requestCount int
-	if !exists {
-		requestCount = 1
-		rl.storage.SetClientData(clientID, &storage.ClientData{
-			RequestCount: 1,
-			WindowStart:  now,
-			BlockedUntil: time.Time{},
-		})
-	} else {
-		requestCount = rl.storage.IncrementRequestCount(clientID)
-	}
-
-	if requestCount > rl.maxRequests {
-		blockedUntil := now.Add(rl.blockDuration)
-		rl.storage.BlockClient(clientID, blockedUntil)
-
+	if data.RequestCount > rl.maxRequests {
 		retryAfterSec := int(rl.blockDuration.Seconds())
 
 		if rl.logOnExceedOnly {
 			rl.logger.Info("Rate limit exceeded",
 				slog.String("client_id", clientID),
-				slog.Int("requests_made", requestCount),
+				slog.Int("requests_made", data.RequestCount),
 				slog.Int("limit", rl.maxRequests),
-				slog.Time("retry_after", blockedUntil),
+				slog.Time("retry_after", data.BlockedUntil),
 			)
 		}
 
 		return &Result{
 			Allowed:       false,
-			RequestsMade:  requestCount,
+			RequestsMade:  data.RequestCount,
 			Limit:         rl.maxRequests,
-			RetryAfter:    blockedUntil,
+			RetryAfter:    data.BlockedUntil,
 			RetryAfterSec: retryAfterSec,
 			ErrorMessage:  rl.errorMessage,
 		}
@@ -186,7 +162,7 @@ func (rl *RateLimiter) Allow(clientID string) *Result {
 
 	return &Result{
 		Allowed:      true,
-		RequestsMade: requestCount,
+		RequestsMade: data.RequestCount,
 		Limit:        rl.maxRequests,
 	}
 }

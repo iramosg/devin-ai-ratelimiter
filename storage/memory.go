@@ -24,9 +24,9 @@ func NewMemoryStorage() *MemoryStorage {
 
 func (s *MemoryStorage) GetClientData(clientID string) (*ClientData, bool) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	
 	data, exists := s.clients[clientID]
+	s.mu.RUnlock()
+	
 	if !exists {
 		return nil, false
 	}
@@ -99,4 +99,60 @@ func (s *MemoryStorage) Clear() {
 	defer s.mu.Unlock()
 	
 	s.clients = make(map[string]*ClientData)
+}
+
+func (s *MemoryStorage) CheckAndIncrement(clientID string, now time.Time, windowDuration time.Duration, maxRequests int, blockDuration time.Duration) (*ClientData, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	data, exists := s.clients[clientID]
+	
+	if exists && !data.BlockedUntil.IsZero() && now.Before(data.BlockedUntil) {
+		dataCopy := &ClientData{
+			RequestCount: data.RequestCount,
+			WindowStart:  data.WindowStart,
+			BlockedUntil: data.BlockedUntil,
+		}
+		return dataCopy, false
+	}
+	
+	if exists && (!data.BlockedUntil.IsZero() && now.After(data.BlockedUntil)) {
+		s.clients[clientID] = &ClientData{
+			RequestCount: 1,
+			WindowStart:  now,
+			BlockedUntil: time.Time{},
+		}
+		return s.clients[clientID], true
+	}
+	
+	if exists && now.Sub(data.WindowStart) >= windowDuration {
+		s.clients[clientID] = &ClientData{
+			RequestCount: 1,
+			WindowStart:  now,
+			BlockedUntil: time.Time{},
+		}
+		return s.clients[clientID], true
+	}
+	
+	if !exists {
+		s.clients[clientID] = &ClientData{
+			RequestCount: 1,
+			WindowStart:  now,
+			BlockedUntil: time.Time{},
+		}
+		return s.clients[clientID], true
+	}
+	
+	data.RequestCount++
+	
+	if data.RequestCount > maxRequests {
+		data.BlockedUntil = now.Add(blockDuration)
+	}
+	
+	dataCopy := &ClientData{
+		RequestCount: data.RequestCount,
+		WindowStart:  data.WindowStart,
+		BlockedUntil: data.BlockedUntil,
+	}
+	return dataCopy, true
 }
