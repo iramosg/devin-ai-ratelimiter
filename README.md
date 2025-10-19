@@ -247,8 +247,6 @@ rateLimiterMiddleware := middleware.NewRateLimiterMiddleware(
 
 A complete example API is provided in the `examples/memory` directory.
 
-**Note:** The example is configured with **10 requests per minute** (instead of the library default of 100) to make it easier to test and observe the rate limiting behavior.
-
 ### Using Docker (Recommended)
 
 1. **Start the development container:**
@@ -273,34 +271,33 @@ A complete example API is provided in the `examples/memory` directory.
 
 5. **Test with hey (load testing tool):**
    ```bash
-   # Send 20 requests with 1 concurrent connection
-   # Expected: 10 requests with 200 OK, 10 with 429 Too Many Requests
-   hey -n 20 -c 1 http://localhost:8080/
+   # Send 150 requests with 1 concurrent connection
+   # Expected: 100 requests with 200 OK, 50 with 429 Too Many Requests
+   hey -n 150 -c 1 http://localhost:8080/
    
-   # Send 150 requests with 50 concurrent connections
-   # Expected: 10 requests with 200 OK, 140 with 429 Too Many Requests
-   hey -n 150 -c 50 http://localhost:8080/
+   # Send 200 requests with 50 concurrent connections
+   # Expected: 100 requests with 200 OK, 100 with 429 Too Many Requests
+   hey -n 200 -c 50 http://localhost:8080/
    
-   # Send requests for 10 seconds with 2 concurrent connections
-   # Expected: First 10 requests succeed, rest are blocked
-   hey -z 10s -c 2 http://localhost:8080/
+   # Send requests for 10 seconds with 10 concurrent connections
+   # Expected: First ~100 requests succeed, rest are blocked
+   hey -z 10s -c 10 http://localhost:8080/
    ```
 
 6. **Or test with curl:**
    ```bash
    # Make multiple requests to trigger rate limiting
-   for i in {1..15}; do
+   for i in {1..110}; do
      echo "Request $i:"
-     curl -i http://localhost:8080/
-     echo ""
+     curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/
    done
    ```
 
 ### Expected Behavior
 
-With the default configuration (10 requests per minute):
-- The first 10 requests will return `200 OK`
-- The 11th request will return `429 Too Many Requests` with a `Retry-After` header
+With the default configuration (100 requests per minute):
+- The first 100 requests will return `200 OK`
+- The 101st request will return `429 Too Many Requests` with a `Retry-After` header
 - Subsequent requests will continue to be blocked for 1 minute
 - After the block duration expires, requests will be allowed again
 
@@ -326,8 +323,8 @@ Retry-After: 58
 
 {
   "error": "Rate limit exceeded",
-  "limit": 10,
-  "requests_made": 11,
+  "limit": 100,
+  "requests_made": 101,
   "retry_after": "2025-02-06T14:26:30.000Z"
 }
 ```
