@@ -247,6 +247,8 @@ rateLimiterMiddleware := middleware.NewRateLimiterMiddleware(
 
 A complete example API is provided in the `examples/memory` directory.
 
+**Note:** The example is configured with **10 requests per minute** (instead of the library default of 100) to make it easier to test and observe the rate limiting behavior.
+
 ### Using Docker (Recommended)
 
 1. **Start the development container:**
@@ -272,12 +274,15 @@ A complete example API is provided in the `examples/memory` directory.
 5. **Test with hey (load testing tool):**
    ```bash
    # Send 20 requests with 1 concurrent connection
+   # Expected: 10 requests with 200 OK, 10 with 429 Too Many Requests
    hey -n 20 -c 1 http://localhost:8080/
    
-   # Send 50 requests with 5 concurrent connections
-   hey -n 50 -c 5 http://localhost:8080/
+   # Send 150 requests with 50 concurrent connections
+   # Expected: 10 requests with 200 OK, 140 with 429 Too Many Requests
+   hey -n 150 -c 50 http://localhost:8080/
    
-   # Send requests for 10 seconds
+   # Send requests for 10 seconds with 2 concurrent connections
+   # Expected: First 10 requests succeed, rest are blocked
    hey -z 10s -c 2 http://localhost:8080/
    ```
 
