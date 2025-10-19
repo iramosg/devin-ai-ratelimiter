@@ -24,9 +24,9 @@ func NewMemoryStorage() *MemoryStorage {
 
 func (s *MemoryStorage) GetClientData(clientID string) (*ClientData, bool) {
 	s.mu.RLock()
-	data, exists := s.clients[clientID]
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
 	
+	data, exists := s.clients[clientID]
 	if !exists {
 		return nil, false
 	}
@@ -122,7 +122,12 @@ func (s *MemoryStorage) CheckAndIncrement(clientID string, now time.Time, window
 			WindowStart:  now,
 			BlockedUntil: time.Time{},
 		}
-		return s.clients[clientID], true
+		dataCopy := &ClientData{
+			RequestCount: 1,
+			WindowStart:  now,
+			BlockedUntil: time.Time{},
+		}
+		return dataCopy, true
 	}
 	
 	if exists && now.Sub(data.WindowStart) >= windowDuration {
@@ -131,7 +136,12 @@ func (s *MemoryStorage) CheckAndIncrement(clientID string, now time.Time, window
 			WindowStart:  now,
 			BlockedUntil: time.Time{},
 		}
-		return s.clients[clientID], true
+		dataCopy := &ClientData{
+			RequestCount: 1,
+			WindowStart:  now,
+			BlockedUntil: time.Time{},
+		}
+		return dataCopy, true
 	}
 	
 	if !exists {
@@ -140,7 +150,12 @@ func (s *MemoryStorage) CheckAndIncrement(clientID string, now time.Time, window
 			WindowStart:  now,
 			BlockedUntil: time.Time{},
 		}
-		return s.clients[clientID], true
+		dataCopy := &ClientData{
+			RequestCount: 1,
+			WindowStart:  now,
+			BlockedUntil: time.Time{},
+		}
+		return dataCopy, true
 	}
 	
 	data.RequestCount++
