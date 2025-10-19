@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  ratelimiter-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ratelimiter-dev
+    volumes:
+      - .:/app
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    ports:
+      - "8080:8080"
